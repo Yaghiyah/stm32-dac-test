@@ -2,6 +2,10 @@
 
 /* Includes ------------------------------------------------------------------*/
 #include <math.h> 
+/* This has to be included before core_cm4 because it tells it our interrupt
+ * table */
+#include "stm32f4xx.h"
+#include <core_cm4.h> 
 #include "stm32f4_discovery.h"
 #include "stm32f4xx_conf.h" // again, added because ST didn't put it here ?
 
@@ -33,6 +37,11 @@ I2C_InitTypeDef     I2C_InitStruct;
 void Delay(__IO uint32_t nCount);
 double sineTone(double *phase, double freq, double sr);
 
+/* Interrupt definition */
+extern void SPI3_IRQHandler(void);
+/* Another interrupt def */
+extern void EXTI0_IRQHandler(void);
+
 /**
   * @brief  Main program
   * @param  None
@@ -47,6 +56,20 @@ int main(void)
         system_stm32f4xx.c file
      */
 
+    /* more dumb interrupts */
+    SYSCFG->EXTICR[0]   = 0x0000;
+    EXTI->IMR          |= 0x00000001;
+    EXTI->EMR          |= 0x00000001;
+    EXTI->RTSR         |= 0x00000001;
+    NVIC_EnableIRQ(EXTI0_IRQn);
+
+    /* GPIOD Peripheral clock enable */
+/*     RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOD, ENABLE); */
+    RCC->AHB1ENR |= RCC_AHB1ENR_GPIODEN;
+
+    /* I2C1 Peripheral clock enable and I2S3 Peripheral clock enable (SPI3) */
+    RCC->APB1ENR |= RCC_APB1ENR_SPI3EN | RCC_APB1ENR_I2C1EN;
+
     /* Configure I2SDIV and ODD factor to get desired sampling rate */
     SPI3->I2SPR = (I2SODD << 8) | I2SDIV;
     
@@ -58,17 +81,8 @@ int main(void)
     /* Enable SPI Transmit interrupt */
     SPI3->CR2 |= SPI_CR2_TXEIE;
 
-    /* Enable I2S! */
-    SPI3->I2SCFGR |= SPI_I2SCFGR_I2SE;
-
-    /* GPIOD Peripheral clock enable */
-    RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOD, ENABLE);
-
-    /* I2C1 Peripheral clock enable */
-    RCC_APB1PeriphClockCmd(RCC_APB1Periph_I2C1, ENABLE);
-
-    /* I2S3 Peripheral clock enable (SPI3) */
-    RCC_APB1PeriphClockCmd(RCC_APB1Periph_SPI3, ENABLE);
+    double somenumber = 0;
+    somenumber = sin(M_PI / 2);
 
 
     /* Configure PD4 in output pushpull mode (reset pin of cirrus) */
@@ -82,7 +96,7 @@ int main(void)
     /* bring RESET high to enable chip */
     GPIO_SetBits(GPIOD, GPIO_Pin_4);
 
-     /* Configure I2C1 */
+    /* Configure I2C1 */
 
     /* Initialize with defaults */    
     I2C_StructInit(&I2C_InitStruct);
@@ -119,6 +133,35 @@ int main(void)
     I2C_SendData(I2C1, 0xe0);
 
     /* close communication */
+    I2C_GenerateSTOP(I2C1, ENABLE);
+
+    /* configure for I2S */
+    I2C_GenerateSTART(I2C1, ENABLE);
+    I2C_SendData(I2C1, 0x06);
+    I2C_SendData(I2C1, 0x07);
+    I2C_GenerateSTOP(I2C1, ENABLE);
+
+    /* configure headphones and speaker */
+    I2C_GenerateSTART(I2C1, ENABLE);
+    I2C_SendData(I2C1, 0x04);
+    I2C_SendData(I2C1, 0xA5);
+    I2C_GenerateSTOP(I2C1, ENABLE);
+
+    /* Enable transmitter interrupt */
+    NVIC_EnableIRQ(SPI3_IRQn);
+
+    /* Enable I2S! */
+    SPI3->I2SCFGR |= SPI_I2SCFGR_I2SE;
+
+    /* start another communication */
+    I2C_GenerateSTART(I2C1, ENABLE);
+
+    /* Write Chip Address, AD0 is low because it's connected to ground */
+    I2C_Send7bitAddress(I2C1, 0x94, I2C_Direction_Transmitter);
+
+    /* We're just writing to one address */
+    I2C_SendData(I2C1, 0x02);
+    I2C_SendData(I2C1, 0x9e);
     I2C_GenerateSTOP(I2C1, ENABLE);
 
   while (1)
@@ -166,6 +209,15 @@ void Delay(__IO uint32_t nCount)
   }
 }
 
+void EXTI0_IRQHandler(void)
+{
+    NVIC_ClearPendingIRQ(EXTI0_IRQn);
+    NVIC_DisableIRQ(EXTI0_IRQn);
+    GPIOD->ODR ^=  GPIO_Pin_12|GPIO_Pin_13|GPIO_Pin_14|GPIO_Pin_15;
+    EXTI->PR = 0x00000001;
+    NVIC_EnableIRQ(EXTI0_IRQn);
+}
+
 /* generates a sine tone at a specific frequency and sample rate */
 double sineTone(double *phase, double freq, double sr)
 {
@@ -179,19 +231,34 @@ double sineTone(double *phase, double freq, double sr)
 void SPI3_IRQHandler(void)
 {
     static double phaseL = 0, phaseR = 0;
+/*     NVIC_DisableIRQ(SPI3_IRQn); */
+
     /* Check that transmit buffer empty */
-    if (SPI3->SR & SPI_SR_TXE) {
+    if (SPI3->SR & (uint32_t)SPI_SR_TXE) {
         /* If so, fill with data */
-        SPI3->DR = (SPI3->SR & SPI_SR_CHSIDE) ? 
+        if (SPI3->SR & (uint32_t)SPI_SR_CHSIDE) {
+            SPI3->DR = (uint16_t)(0xffff * sineTone(&phaseR,
+                SINE_TONE_FREQ,
+                SAMPLING_RATE));
+        } else {
+            SPI3->DR = (uint16_t)(0xffff * sineTone(&phaseL,
+                SINE_TONE_FREQ,
+                SAMPLING_RATE));
+        }
+        /*
+        SPI3->DR = (SPI3->SR & (uint32_t)SPI_SR_CHSIDE) ? 
             (uint16_t)(0xffff * sineTone(&phaseR,
                 SINE_TONE_FREQ,
                 SAMPLING_RATE)) :
             (uint16_t)(0xffff * sineTone(&phaseL,
                 SINE_TONE_FREQ,
                 SAMPLING_RATE));
+        */
         /* set transmit buffer to not empty */
         SPI3->SR &= ~SPI_SR_TXE;
     } /* Otherwise do nothing for now */
+
+/*     NVIC_EnableIRQ(SPI3_IRQn); */
 }
 
 

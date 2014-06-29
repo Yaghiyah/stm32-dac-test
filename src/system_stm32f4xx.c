@@ -381,7 +381,7 @@ static void SetSysClock(void)
                    (RCC_PLLCFGR_PLLSRC_HSE) | (PLL_Q << 24);
 
     /* Configure I2SPLL to use PLLI2S clock (same as PLL) */
-    RCC->CFGR &= ~RCC_CFGR_I2SSRC;
+    RCC->CFGR &= (uint32_t)((uint32_t)~RCC_CFGR_I2SSRC);
 
     /* Configure PLLI2S Clock dividers */
     RCC->PLLI2SCFGR = (PLLI2S_R << 28) | (PLLI2S_N << 6);

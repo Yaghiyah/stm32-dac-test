@@ -13,8 +13,8 @@ PROJ_NAME=main
 CC=arm-none-eabi-gcc
 OBJCOPY=arm-none-eabi-objcopy
 
-CFLAGS  = -g -O2 -Wall -Tstm32_flash.ld 
-CFLAGS += -mlittle-endian -mthumb -mcpu=cortex-m4 -mthumb-interwork
+CFLAGS  = -g -Wall -Tstm32_flash.ld 
+CFLAGS += -mlittle-endian -mthumb -mcpu=cortex-m4 #-mthumb-interwork
 CFLAGS += -mfloat-abi=hard -mfpu=fpv4-sp-d16
 
 ###################################################
@@ -25,7 +25,7 @@ vpath %.a lib
 ROOT=$(shell pwd)
 
 CFLAGS += -Iinc -Ilib -Ilib/inc 
-CFLAGS += -Ilib/inc/core -Ilib/inc/peripherals 
+CFLAGS += -Ilib/inc/core -Ilib/inc/peripherals
 
 SRCS += lib/startup_stm32f4xx.s # add startup file to build
 
