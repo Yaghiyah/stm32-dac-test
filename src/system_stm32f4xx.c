@@ -153,6 +153,11 @@
 /* USB OTG FS, SDIO and RNG Clock =  PLL_VCO / PLLQ */
 #define PLL_Q      7
 
+/* I2S Configuration Values. See Main for the SPI Module I2S division and odd
+ * factors to get the desired sampling rate */
+#define PLLI2S_N    192
+#define PLLI2S_R    5 
+
 /**
   * @}
   */
@@ -375,13 +380,28 @@ static void SetSysClock(void)
     RCC->PLLCFGR = PLL_M | (PLL_N << 6) | (((PLL_P >> 1) -1) << 16) |
                    (RCC_PLLCFGR_PLLSRC_HSE) | (PLL_Q << 24);
 
+    /* Configure I2SPLL to use PLLI2S clock (same as PLL) */
+    RCC->CFGR &= ~RCC_CFGR_I2SSRC;
+
+    /* Configure PLLI2S Clock dividers */
+    RCC->PLLI2SCFGR = (PLLI2S_R << 28) | (PLLI2S_N << 6);
+
     /* Enable the main PLL */
     RCC->CR |= RCC_CR_PLLON;
+
+    /* Enable I2SPLL */
+    RCC->CR |= RCC_CR_PLLI2SON;
 
     /* Wait till the main PLL is ready */
     while((RCC->CR & RCC_CR_PLLRDY) == 0)
     {
     }
+
+    /* Wait until I2SPLL ready */
+    while((RCC->CR & RCC_CR_PLLI2SRDY) == 0)
+    {
+    }
+
    
     /* Configure Flash prefetch, Instruction cache, Data cache and wait state */
     FLASH->ACR = FLASH_ACR_ICEN |FLASH_ACR_DCEN |FLASH_ACR_LATENCY_5WS;

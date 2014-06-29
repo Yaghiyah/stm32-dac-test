@@ -1,27 +1,22 @@
-/**
-  ******************************************************************************
-  * @file    IO_Toggle/main.c 
-  * @author  MCD Application Team
-  * @version V1.0.0
-  * @date    19-September-2011
-  * @brief   Main program body
-  ******************************************************************************
-  * @attention
-  *
-  * THE PRESENT FIRMWARE WHICH IS FOR GUIDANCE ONLY AIMS AT PROVIDING CUSTOMERS
-  * WITH CODING INFORMATION REGARDING THEIR PRODUCTS IN ORDER FOR THEM TO SAVE
-  * TIME. AS A RESULT, STMICROELECTRONICS SHALL NOT BE HELD LIABLE FOR ANY
-  * DIRECT, INDIRECT OR CONSEQUENTIAL DAMAGES WITH RESPECT TO ANY CLAIMS ARISING
-  * FROM THE CONTENT OF SUCH FIRMWARE AND/OR THE USE MADE BY CUSTOMERS OF THE
-  * CODING INFORMATION CONTAINED HEREIN IN CONNECTION WITH THEIR PRODUCTS.
-  *
-  * <h2><center>&copy; COPYRIGHT 2011 STMicroelectronics</center></h2>
-  ******************************************************************************  
-  */ 
+/* Get Cirrus DAC to beep using STM32F4 */
 
 /* Includes ------------------------------------------------------------------*/
+#include <math.h> 
 #include "stm32f4_discovery.h"
 #include "stm32f4xx_conf.h" // again, added because ST didn't put it here ?
+
+/* In combination with
+ * PLLI2S_N  =  192
+ * PLLI2S_R  =  5
+ * these will achieve a sampling rate of 48000
+ */
+#define I2SDIV      12
+#define I2SODD      1 
+#define SAMPLING_RATE 48000 
+
+/* Play sine tone at 440 Hz */
+#define SINE_TONE_FREQ 440 
+
 
 /** @addtogroup STM32F4_Discovery_Peripheral_Examples
   * @{
@@ -32,14 +27,11 @@
   */ 
 
 /* Private typedef -----------------------------------------------------------*/
-GPIO_InitTypeDef  GPIO_InitStructure;
+GPIO_InitTypeDef    GPIO_InitStructure;
+I2C_InitTypeDef     I2C_InitStruct;
 
-/* Private define ------------------------------------------------------------*/
-/* Private macro -------------------------------------------------------------*/
-/* Private variables ---------------------------------------------------------*/
-/* Private function prototypes -----------------------------------------------*/
 void Delay(__IO uint32_t nCount);
-/* Private functions ---------------------------------------------------------*/
+double sineTone(double *phase, double freq, double sr);
 
 /**
   * @brief  Main program
@@ -55,16 +47,79 @@ int main(void)
         system_stm32f4xx.c file
      */
 
-  /* GPIOD Periph clock enable */
-  RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOD, ENABLE);
+    /* Configure I2SDIV and ODD factor to get desired sampling rate */
+    SPI3->I2SPR = (I2SODD << 8) | I2SDIV;
+    
+    /* Configure I2S instead of SPI, to master-transmit, to use Philips Standard, to
+     * transmit data of 16-bit length, to expect 16-bit data (some are default
+     * and therefore not set)*/
+    SPI3->I2SCFGR = SPI_I2SCFGR_I2SMOD | SPI_I2SCFGR_I2SCFG_1;
 
-  /* Configure PD4 in output pushpull mode */
-  GPIO_InitStructure.GPIO_Pin = GPIO_Pin_4 ;
-  GPIO_InitStructure.GPIO_Mode = GPIO_Mode_OUT;
-  GPIO_InitStructure.GPIO_OType = GPIO_OType_PP; /* What happens with open/drain? */
-  GPIO_InitStructure.GPIO_Speed = GPIO_Speed_100MHz;
-  GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_NOPULL;
-  GPIO_Init(GPIOD, &GPIO_InitStructure);
+    /* Enable SPI Transmit interrupt */
+    SPI3->CR2 |= SPI_CR2_TXEIE;
+
+    /* Enable I2S! */
+    SPI3->I2SCFGR |= SPI_I2SCFGR_I2SE;
+
+    /* GPIOD Peripheral clock enable */
+    RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOD, ENABLE);
+
+    /* I2C1 Peripheral clock enable */
+    RCC_APB1PeriphClockCmd(RCC_APB1Periph_I2C1, ENABLE);
+
+    /* I2S3 Peripheral clock enable (SPI3) */
+    RCC_APB1PeriphClockCmd(RCC_APB1Periph_SPI3, ENABLE);
+
+
+    /* Configure PD4 in output pushpull mode (reset pin of cirrus) */
+    GPIO_InitStructure.GPIO_Pin = GPIO_Pin_4|GPIO_Pin_12|GPIO_Pin_13|GPIO_Pin_14|GPIO_Pin_15;
+    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_OUT;
+    GPIO_InitStructure.GPIO_OType = GPIO_OType_PP; /* What happens with open/drain? */
+    GPIO_InitStructure.GPIO_Speed = GPIO_Speed_100MHz;
+    GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_NOPULL;
+    GPIO_Init(GPIOD, &GPIO_InitStructure);
+    
+    /* bring RESET high to enable chip */
+    GPIO_SetBits(GPIOD, GPIO_Pin_4);
+
+     /* Configure I2C1 */
+
+    /* Initialize with defaults */    
+    I2C_StructInit(&I2C_InitStruct);
+    /* 50kHz */
+    I2C_InitStruct.I2C_ClockSpeed     = 50000;
+    /* I2C Mode */
+    I2C_InitStruct.I2C_Mode           = I2C_Mode_I2C;
+
+    /* Initialize I2C */
+    I2C_Init(I2C1, &I2C_InitStruct);
+
+    /* Enable I2C */
+    I2C_Cmd(I2C1, ENABLE);
+
+    /* Send some control data to make it beep (see Cirrus datasheet) */
+    
+    /* Generate start */
+    I2C_GenerateSTART(I2C1, ENABLE);
+
+    /* Write Chip Address, AD0 is low because it's connected to ground */
+    I2C_Send7bitAddress(I2C1, 0x94, I2C_Direction_Transmitter);
+
+    /* write address that we're starting to write at (beep freq/on-time), and
+     * that we're incrementing addresses */
+    I2C_SendData(I2C1, 0x1c | 0x80);
+
+    /* write beep freq 1000hz, on-time 5.2 sec */
+    I2C_SendData(I2C1, 0x7f);
+
+    /* keep beep volume and time the same */
+    I2C_SendData(I2C1, 0x00);
+
+    /* set beep occurence to continuous, disable mixing, leave eq same */
+    I2C_SendData(I2C1, 0xe0);
+
+    /* close communication */
+    I2C_GenerateSTOP(I2C1, ENABLE);
 
   while (1)
   {
@@ -110,6 +165,35 @@ void Delay(__IO uint32_t nCount)
   {
   }
 }
+
+/* generates a sine tone at a specific frequency and sample rate */
+double sineTone(double *phase, double freq, double sr)
+{
+    *phase += freq / sr;
+    while (*phase > 1.) { *phase -= 1.; }
+    return sin(2 * M_PI * (*phase));
+}
+
+/* Figures out why was called then remedies. So far probably just fills the
+ * buffer with values to transmit */
+void SPI3_IRQHandler(void)
+{
+    static double phaseL = 0, phaseR = 0;
+    /* Check that transmit buffer empty */
+    if (SPI3->SR & SPI_SR_TXE) {
+        /* If so, fill with data */
+        SPI3->DR = (SPI3->SR & SPI_SR_CHSIDE) ? 
+            (uint16_t)(0xffff * sineTone(&phaseR,
+                SINE_TONE_FREQ,
+                SAMPLING_RATE)) :
+            (uint16_t)(0xffff * sineTone(&phaseL,
+                SINE_TONE_FREQ,
+                SAMPLING_RATE));
+        /* set transmit buffer to not empty */
+        SPI3->SR &= ~SPI_SR_TXE;
+    } /* Otherwise do nothing for now */
+}
+
 
 #ifdef  USE_FULL_ASSERT
 
