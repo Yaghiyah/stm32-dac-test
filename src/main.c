@@ -4,6 +4,7 @@
 #include <math.h> 
 /* This has to be included before core_cm4 because it tells it our interrupt
  * table */
+#include <stdlib.h> 
 #include "stm32f4xx.h"
 #include <core_cm4.h> 
 #include "stm32f4_discovery.h"
@@ -124,7 +125,7 @@ void I2S_init(void)
     /* Enable pull up resistors, also don't know why, using the same as I2C */
     GPIOA_InitStruct.GPIO_PuPd = GPIO_PuPd_UP;
     /* initialize GPIOC */
-    GPIO_Init(GPIOA, &GPIO_InitStruct);
+    GPIO_Init(GPIOA, &GPIOA_InitStruct);
     
     /* Connect I2S3 (SPI3) pins to GPIO's Alternate Function */
     GPIO_PinAFConfig(GPIOC, GPIO_PinSource7, GPIO_AF_SPI3); /* MCLK */
@@ -136,16 +137,17 @@ void I2S_init(void)
     I2S3_InitStruct.I2S_Mode = I2S_Mode_MasterTx;
     I2S3_InitStruct.I2S_Standard = I2S_Standard_Phillips;
     I2S3_InitStruct.I2S_DataFormat = I2S_DataFormat_16b;
-    I2S3_InitStruct.I2S_MCLKOutput = I2S_MCLKOutput_Disable;
+    I2S3_InitStruct.I2S_MCLKOutput = I2S_MCLKOutput_Enable;
     I2S3_InitStruct.I2S_AudioFreq = I2S_AudioFreq_48k;
     I2S3_InitStruct.I2S_CPOL = I2S_CPOL_Low; /* I don't know, low I guess. */
     I2S_Init(SPI3, &I2S3_InitStruct);
 
+    /* Enable transmitter interrupt in NVIC */
+    NVIC_EnableIRQ(SPI3_IRQn);
+
     /* Enable transmit buffer empty interrupt */
     SPI_ITConfig(SPI3, SPI_I2S_IT_TXE, ENABLE);
 
-    /* Enable transmitter interrupt in NVIC */
-    NVIC_EnableIRQ(SPI3_IRQn);
 
 }
 
@@ -235,10 +237,10 @@ uint8_t I2C_read_nack(I2C_TypeDef* I2Cx){
  */
 void I2C_stop(I2C_TypeDef* I2Cx){
 	
-	// Send I2C1 STOP Condition after last byte has been transmitted
-	I2C_GenerateSTOP(I2Cx, ENABLE);
 	// wait for I2C1 EV8_2 --> byte has been transmitted
 	while(!I2C_CheckEvent(I2Cx, I2C_EVENT_MASTER_BYTE_TRANSMITTED));
+	// Send I2C1 STOP Condition after last byte has been transmitted
+	I2C_GenerateSTOP(I2Cx, ENABLE);
 }
 
 /* CS43L22 needs reset pin high to work */
@@ -263,7 +265,7 @@ void led_init()
 {
 	RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOD, ENABLE);
     GPIO_InitTypeDef GPIOD_InitStructure;
-    GPIOD_InitStructure.GPIO_Pin = GPIO_Pin_12 | GPIO_Pin_13;
+    GPIOD_InitStructure.GPIO_Pin = GPIO_Pin_14 | GPIO_Pin_13 | GPIO_Pin_12;
     GPIOD_InitStructure.GPIO_Mode = GPIO_Mode_OUT;
     GPIOD_InitStructure.GPIO_OType = GPIO_OType_PP; /* What happens with open/drain? */
     GPIOD_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
@@ -294,16 +296,76 @@ int main(void)
 	uint8_t received_data;
 	
 	I2C_start(I2C1, SLAVE_ADDRESS<<1, I2C_Direction_Transmitter); // start a transmission in Master transmitter mode
+    /* write address that we're starting to write at (beep freq/on-time), and
+     * that we're incrementing addresses */
+    I2C_write(I2C1, 0x1c | 0x80);
+    /* write beep freq 1000hz, on-time 5.2 sec */
+    I2C_write(I2C1, 0x7f);
+    /* set beep volume and offtime to default */
+    I2C_write(I2C1, 0x00);
+    /* set beep occurence to continuous, disable mixing, leave eq same */
+    I2C_write(I2C1, 0xc0);
+	I2C_stop(I2C1); // stop the transmission
+
+    /* configure for I2S */
+	I2C_start(I2C1, SLAVE_ADDRESS<<1, I2C_Direction_Transmitter); // start a transmission in Master transmitter mode
+    I2C_write(I2C1, 0x06);
+    I2C_write(I2C1, 0x07);
+	I2C_stop(I2C1); // stop the transmission
+
+    /* configure MCLK */
+	I2C_start(I2C1, SLAVE_ADDRESS<<1, I2C_Direction_Transmitter); // start a transmission in Master transmitter mode
+    I2C_write(I2C1, 0x07);
+    I2C_write(I2C1, 0x00); /* synchronously retimed... */
+	I2C_stop(I2C1); // stop the transmission
+
+    /* configure headphones and speaker */
+	I2C_start(I2C1, SLAVE_ADDRESS<<1, I2C_Direction_Transmitter); // start a transmission in Master transmitter mode
+    I2C_write(I2C1, 0x04);
+    I2C_write(I2C1, 0xA5);
+    I2C_stop(I2C1);
+
+    /* init I2S */
+    I2S_init();
+
+    /* start I2S */
+    I2S_Cmd(SPI3, ENABLE);
+
+    /* set CIRRUS to power on state */
+	I2C_start(I2C1, SLAVE_ADDRESS<<1, I2C_Direction_Transmitter); // start a transmission in Master transmitter mode
+    I2C_write(I2C1, 0x02);
+    I2C_write(I2C1, 0x9e);
+    I2C_stop(I2C1);
+
+	/* make sure it still works the old way (red led will come on)*/
+
+	I2C_start(I2C1, SLAVE_ADDRESS<<1, I2C_Direction_Transmitter); // start a transmission in Master transmitter mode
 	I2C_write(I2C1, 0x01); // write one byte to the slave
 	I2C_stop(I2C1); // stop the transmission
 		
 	I2C_start(I2C1, SLAVE_ADDRESS<<1, I2C_Direction_Receiver); // start a transmission in Master receiver mode
 	received_data = I2C_read_nack(I2C1); // read one byte and don't request another byte, stop transmission
 	if(((received_data & (0x1f << 3)) >> 3) == (0x7 << 2)) {
-        GPIO_SetBits(GPIOD, GPIO_Pin_12);
+        GPIO_SetBits(GPIOD, GPIO_Pin_14);
     } else {
         GPIO_SetBits(GPIOD, GPIO_Pin_13);
     }
+
+    /* read CIRRUS status register */
+	I2C_start(I2C1, SLAVE_ADDRESS<<1, I2C_Direction_Transmitter); // start a transmission in Master transmitter mode
+	I2C_write(I2C1, 0x2e); // write one byte to the slave
+	I2C_stop(I2C1); // stop the transmission
+	I2C_start(I2C1, SLAVE_ADDRESS<<1, I2C_Direction_Receiver); // start a transmission in Master receiver mode
+	received_data = I2C_read_nack(I2C1); // read one byte and don't request another byte, stop transmission
+    if((received_data & 0x7c) != 0){
+        /* no good, orange*/
+        GPIO_SetBits(GPIOD, GPIO_Pin_13);
+        while(1);
+    }
+    /* when good, green */
+    GPIO_ResetBits(GPIOD, GPIO_Pin_13);
+    GPIO_SetBits(GPIOD, GPIO_Pin_12);
+
 	while(1);
 	return 0;
 
@@ -396,7 +458,7 @@ double sineTone(double *phase, double freq, double sr)
 
 int16_t simpleTone()
 {
-    static int16_t state = 1;
+    static int16_t state = 0x7fff;
     state *= -1;
     return state;
 }
@@ -414,15 +476,15 @@ void SPI3_IRQHandler(void)
     if (SPI3->SR & (uint32_t)SPI_SR_TXE) {
         /* If so, fill with data */
         if (SPI3->SR & (uint32_t)SPI_SR_CHSIDE) {
-            data = simpleTone();
-            SPI3->DR = data;
+            data = rand();
+            SPI_I2S_SendData(SPI3,data);
             /*
             SPI3->DR = (uint16_t)(0xffff * sineTone(&phaseR,
                 SINE_TONE_FREQ,
                 SAMPLING_RATE));*/
         } else {
-            data = simpleTone();
-            SPI3->DR = data;
+            data = rand();
+            SPI_I2S_SendData(SPI3,data);
             /*
             SPI3->DR = (uint16_t)(0xffff * sineTone(&phaseL,
                 SINE_TONE_FREQ,
