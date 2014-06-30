@@ -101,7 +101,7 @@ int main(void)
     /* Initialize with defaults */    
     I2C_StructInit(&I2C_InitStruct);
     /* 50kHz */
-    I2C_InitStruct.I2C_ClockSpeed     = 50000;
+    I2C_InitStruct.I2C_ClockSpeed     = 100000;
     /* I2C Mode */
     I2C_InitStruct.I2C_Mode           = I2C_Mode_I2C;
 
@@ -137,12 +137,16 @@ int main(void)
 
     /* configure for I2S */
     I2C_GenerateSTART(I2C1, ENABLE);
+    /* Write Chip Address, AD0 is low because it's connected to ground */
+    I2C_Send7bitAddress(I2C1, 0x94, I2C_Direction_Transmitter);
     I2C_SendData(I2C1, 0x06);
     I2C_SendData(I2C1, 0x07);
     I2C_GenerateSTOP(I2C1, ENABLE);
 
     /* configure headphones and speaker */
     I2C_GenerateSTART(I2C1, ENABLE);
+    /* Write Chip Address, AD0 is low because it's connected to ground */
+    I2C_Send7bitAddress(I2C1, 0x94, I2C_Direction_Transmitter);
     I2C_SendData(I2C1, 0x04);
     I2C_SendData(I2C1, 0xA5);
     I2C_GenerateSTOP(I2C1, ENABLE);
@@ -226,24 +230,40 @@ double sineTone(double *phase, double freq, double sr)
     return sin(2 * M_PI * (*phase));
 }
 
+int16_t simpleTone()
+{
+    static int16_t state = 1;
+    state *= -1;
+    return state;
+}
+    
+
 /* Figures out why was called then remedies. So far probably just fills the
  * buffer with values to transmit */
 void SPI3_IRQHandler(void)
 {
     static double phaseL = 0, phaseR = 0;
+    uint16_t data;
 /*     NVIC_DisableIRQ(SPI3_IRQn); */
 
     /* Check that transmit buffer empty */
     if (SPI3->SR & (uint32_t)SPI_SR_TXE) {
         /* If so, fill with data */
         if (SPI3->SR & (uint32_t)SPI_SR_CHSIDE) {
+            data = simpleTone();
+            SPI3->DR = data;
+            /*
             SPI3->DR = (uint16_t)(0xffff * sineTone(&phaseR,
                 SINE_TONE_FREQ,
-                SAMPLING_RATE));
+                SAMPLING_RATE));*/
         } else {
+            data = simpleTone();
+            SPI3->DR = data;
+            /*
             SPI3->DR = (uint16_t)(0xffff * sineTone(&phaseL,
                 SINE_TONE_FREQ,
                 SAMPLING_RATE));
+                */
         }
         /*
         SPI3->DR = (SPI3->SR & (uint32_t)SPI_SR_CHSIDE) ? 
@@ -255,7 +275,7 @@ void SPI3_IRQHandler(void)
                 SAMPLING_RATE));
         */
         /* set transmit buffer to not empty */
-        SPI3->SR &= ~SPI_SR_TXE;
+//        SPI3->SR &= ~SPI_SR_TXE;
     } /* Otherwise do nothing for now */
 
 /*     NVIC_EnableIRQ(SPI3_IRQn); */
