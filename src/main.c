@@ -42,6 +42,235 @@ extern void SPI3_IRQHandler(void);
 /* Another interrupt def */
 extern void EXTI0_IRQHandler(void);
 
+// this slave address belongs to the STM32F4-Discovery board's 
+// CS43L22 Audio DAC
+// connect PD4 to VDD in order to get the DAC out of reset and test the I2C
+// interface
+#define SLAVE_ADDRESS 0x4A // the slave address (example)
+
+void I2C1_init(void){
+	
+	GPIO_InitTypeDef GPIO_InitStruct;
+	I2C_InitTypeDef I2C_InitStruct;
+	
+	// enable APB1 peripheral clock for I2C1
+	RCC_APB1PeriphClockCmd(RCC_APB1Periph_I2C1, ENABLE);
+	// enable clock for SCL and SDA pins
+	RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOB, ENABLE);
+	
+	/* setup SCL and SDA pins
+	 * You can connect the I2C1 functions to two different
+	 * pins:
+	 * 1. SCL on PB6 or PB8  
+	 * 2. SDA on PB7 or PB9
+	 */
+	GPIO_InitStruct.GPIO_Pin = GPIO_Pin_6 | GPIO_Pin_9; // we are going to use PB6 and PB9
+	GPIO_InitStruct.GPIO_Mode = GPIO_Mode_AF;			// set pins to alternate function
+	GPIO_InitStruct.GPIO_Speed = GPIO_Speed_50MHz;		// set GPIO speed
+	GPIO_InitStruct.GPIO_OType = GPIO_OType_OD;			// set output to open drain --> the line has to be only pulled low, not driven high
+	GPIO_InitStruct.GPIO_PuPd = GPIO_PuPd_UP;			// enable pull up resistors
+	GPIO_Init(GPIOB, &GPIO_InitStruct);					// init GPIOB
+	
+	// Connect I2C1 pins to AF  
+	GPIO_PinAFConfig(GPIOB, GPIO_PinSource6, GPIO_AF_I2C1);	// SCL
+	GPIO_PinAFConfig(GPIOB, GPIO_PinSource9, GPIO_AF_I2C1); // SDA
+	
+	// configure I2C1 
+	I2C_InitStruct.I2C_ClockSpeed = 100000; 		// 100kHz
+	I2C_InitStruct.I2C_Mode = I2C_Mode_I2C;			// I2C mode
+	I2C_InitStruct.I2C_DutyCycle = I2C_DutyCycle_2;	// 50% duty cycle --> standard
+	I2C_InitStruct.I2C_OwnAddress1 = 0x00;			// own address, not relevant in master mode
+	I2C_InitStruct.I2C_Ack = I2C_Ack_Disable;		// disable acknowledge when reading (can be changed later on)
+	I2C_InitStruct.I2C_AcknowledgedAddress = I2C_AcknowledgedAddress_7bit; // set address length to 7 bit addresses
+	I2C_Init(I2C1, &I2C_InitStruct);				// init I2C1
+	
+	// enable I2C1
+	I2C_Cmd(I2C1, ENABLE);
+}
+
+void I2S_init(void)
+{
+    GPIO_InitTypeDef GPIO_InitStruct, GPIOA_InitStruct;
+    I2S_InitTypeDef I2S3_InitStruct;
+
+    /* Enable APB1 peripheral clock for I2S3 (SPI3) */
+    RCC_APB1PeriphClockCmd(RCC_APB1Periph_SPI3, ENABLE);
+    /* Enable AHB1 peripheral clock for GPIOC */
+    RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOC, ENABLE);
+    /* Enable AHB1 peripheral clock for GPIOA */
+    RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOA, ENABLE);
+
+    /* Setup MCLK, SCLK and SDIN pins */
+    GPIO_InitStruct.GPIO_Pin = GPIO_Pin_7 | GPIO_Pin_10 | GPIO_Pin_12;
+    /* set to use alternate function */
+    GPIO_InitStruct.GPIO_Mode = GPIO_Mode_AF; 
+    /* Just chose the fastest speed */
+    GPIO_InitStruct.GPIO_Speed = GPIO_Speed_100MHz; 
+    /* open/drain, line only has to be pulled low? using the same as for I2C*/
+    GPIO_InitStruct.GPIO_OType = GPIO_OType_OD;
+    /* Enable pull up resistors, also don't know why, using the same as I2C */
+    GPIO_InitStruct.GPIO_PuPd = GPIO_PuPd_UP;
+    /* initialize GPIOC */
+    GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+    /* Setup LRCK/AINx pin */
+    GPIOA_InitStruct.GPIO_Pin = GPIO_Pin_4;
+    /* set to use alternate function */
+    GPIOA_InitStruct.GPIO_Mode = GPIO_Mode_AF; 
+    /* Just chose the fastest speed */
+    GPIOA_InitStruct.GPIO_Speed = GPIO_Speed_100MHz; 
+    /* open/drain, line only has to be pulled low? using the same as for I2C*/
+    GPIOA_InitStruct.GPIO_OType = GPIO_OType_OD;
+    /* Enable pull up resistors, also don't know why, using the same as I2C */
+    GPIOA_InitStruct.GPIO_PuPd = GPIO_PuPd_UP;
+    /* initialize GPIOC */
+    GPIO_Init(GPIOA, &GPIO_InitStruct);
+    
+    /* Connect I2S3 (SPI3) pins to GPIO's Alternate Function */
+    GPIO_PinAFConfig(GPIOC, GPIO_PinSource7, GPIO_AF_SPI3); /* MCLK */
+    GPIO_PinAFConfig(GPIOC, GPIO_PinSource10, GPIO_AF_SPI3); /* SCLK */
+    GPIO_PinAFConfig(GPIOC, GPIO_PinSource12, GPIO_AF_SPI3); /* SDIN */
+    GPIO_PinAFConfig(GPIOA, GPIO_PinSource4, GPIO_AF_SPI3); /* LRCK/AINx */
+
+    /* Configure I2S3 (SPI3) */
+    I2S3_InitStruct.I2S_Mode = I2S_Mode_MasterTx;
+    I2S3_InitStruct.I2S_Standard = I2S_Standard_Phillips;
+    I2S3_InitStruct.I2S_DataFormat = I2S_DataFormat_16b;
+    I2S3_InitStruct.I2S_MCLKOutput = I2S_MCLKOutput_Disable;
+    I2S3_InitStruct.I2S_AudioFreq = I2S_AudioFreq_48k;
+    I2S3_InitStruct.I2S_CPOL = I2S_CPOL_Low; /* I don't know, low I guess. */
+    I2S_Init(SPI3, &I2S3_InitStruct);
+
+    /* Enable transmit buffer empty interrupt */
+    SPI_ITConfig(SPI3, SPI_I2S_IT_TXE, ENABLE);
+
+    /* Enable transmitter interrupt in NVIC */
+    NVIC_EnableIRQ(SPI3_IRQn);
+
+}
+
+
+/* This function issues a start condition and 
+ * transmits the slave address + R/W bit
+ * 
+ * Parameters:
+ * 		I2Cx --> the I2C peripheral e.g. I2C1
+ * 		address --> the 7 bit slave address
+ * 		direction --> the transmission direction can be:
+ * 						I2C_Direction_Tranmitter for Master transmitter mode
+ * 						I2C_Direction_Receiver for Master receiver
+ */
+void I2C_start(I2C_TypeDef* I2Cx, uint8_t address, uint8_t direction){
+	// wait until I2C1 is not busy any more
+	while(I2C_GetFlagStatus(I2Cx, I2C_FLAG_BUSY));
+  
+	// Send I2C1 START condition 
+	I2C_GenerateSTART(I2Cx, ENABLE);
+	  
+	// wait for I2C1 EV5 --> Slave has acknowledged start condition
+	while(!I2C_CheckEvent(I2Cx, I2C_EVENT_MASTER_MODE_SELECT));
+		
+	// Send slave Address for write 
+	I2C_Send7bitAddress(I2Cx, address, direction);
+	  
+	/* wait for I2Cx EV6, check if 
+	 * either Slave has acknowledged Master transmitter or
+	 * Master receiver mode, depending on the transmission
+	 * direction
+	 */ 
+	if(direction == I2C_Direction_Transmitter){
+		while(I2C_CheckEvent(I2Cx, I2C_EVENT_MASTER_TRANSMITTER_MODE_SELECTED)
+                == ERROR);
+	}
+	else if(direction == I2C_Direction_Receiver){
+		while(I2C_CheckEvent(I2Cx, I2C_EVENT_MASTER_RECEIVER_MODE_SELECTED)
+                == ERROR);
+	}
+}
+
+/* This function transmits one byte to the slave device
+ * Parameters:
+ *		I2Cx --> the I2C peripheral e.g. I2C1 
+ *		data --> the data byte to be transmitted
+ */
+void I2C_write(I2C_TypeDef* I2Cx, uint8_t data)
+{
+	// wait for I2C1 EV8 --> last byte is still being transmitted (last byte in SR, buffer empty), next byte can already be written
+	while(!I2C_CheckEvent(I2Cx, I2C_EVENT_MASTER_BYTE_TRANSMITTING));
+	I2C_SendData(I2Cx, data);
+}
+
+/* This function reads one byte from the slave device 
+ * and acknowledges the byte (requests another byte)
+ */
+uint8_t I2C_read_ack(I2C_TypeDef* I2Cx){
+	// enable acknowledge of received data
+	I2C_AcknowledgeConfig(I2Cx, ENABLE);
+	// wait until one byte has been received
+	while( !I2C_CheckEvent(I2Cx, I2C_EVENT_MASTER_BYTE_RECEIVED) );
+	// read data from I2C data register and return data byte
+	uint8_t data = I2C_ReceiveData(I2Cx);
+	return data;
+}
+
+/* This function reads one byte from the slave device
+ * and doesn't acknowledge the received data 
+ * after that a STOP condition is transmitted
+ */
+uint8_t I2C_read_nack(I2C_TypeDef* I2Cx){
+	// disable acknowledge of received data
+	// nack also generates stop condition after last byte received
+	// see reference manual for more info
+	I2C_AcknowledgeConfig(I2Cx, DISABLE);
+	I2C_GenerateSTOP(I2Cx, ENABLE);
+	// wait until one byte has been received
+	while( !I2C_CheckEvent(I2Cx, I2C_EVENT_MASTER_BYTE_RECEIVED) );
+	// read data from I2C data register and return data byte
+	uint8_t data = I2C_ReceiveData(I2Cx);
+	return data;
+}
+
+/* This function issues a stop condition and therefore
+ * releases the bus
+ */
+void I2C_stop(I2C_TypeDef* I2Cx){
+	
+	// Send I2C1 STOP Condition after last byte has been transmitted
+	I2C_GenerateSTOP(I2Cx, ENABLE);
+	// wait for I2C1 EV8_2 --> byte has been transmitted
+	while(!I2C_CheckEvent(I2Cx, I2C_EVENT_MASTER_BYTE_TRANSMITTED));
+}
+
+/* CS43L22 needs reset pin high to work */
+void CS43L22_init()
+{
+	RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOD, ENABLE);
+    GPIO_InitTypeDef GPIOD_InitStructure;
+    GPIOD_InitStructure.GPIO_Pin = GPIO_Pin_4;
+    GPIOD_InitStructure.GPIO_Mode = GPIO_Mode_OUT;
+    GPIOD_InitStructure.GPIO_OType = GPIO_OType_PP; /* What happens with open/drain? */
+    GPIOD_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
+    GPIOD_InitStructure.GPIO_PuPd = GPIO_PuPd_UP;
+    GPIO_Init(GPIOD, &GPIOD_InitStructure);
+
+    /* bring RESET low then high */
+    GPIO_ResetBits(GPIOD, GPIO_Pin_4);
+    GPIO_SetBits(GPIOD, GPIO_Pin_4);
+}
+
+/* configure LEDs to show some information */
+void led_init()
+{
+	RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOD, ENABLE);
+    GPIO_InitTypeDef GPIOD_InitStructure;
+    GPIOD_InitStructure.GPIO_Pin = GPIO_Pin_12 | GPIO_Pin_13;
+    GPIOD_InitStructure.GPIO_Mode = GPIO_Mode_OUT;
+    GPIOD_InitStructure.GPIO_OType = GPIO_OType_PP; /* What happens with open/drain? */
+    GPIOD_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
+    GPIOD_InitStructure.GPIO_PuPd = GPIO_PuPd_NOPULL;
+    GPIO_Init(GPIOD, &GPIOD_InitStructure);
+}
+    
 /**
   * @brief  Main program
   * @param  None
@@ -56,149 +285,84 @@ int main(void)
         system_stm32f4xx.c file
      */
 
-    /* more dumb interrupts */
-    SYSCFG->EXTICR[0]   = 0x0000;
-    EXTI->IMR          |= 0x00000001;
-    EXTI->EMR          |= 0x00000001;
-    EXTI->RTSR         |= 0x00000001;
-    NVIC_EnableIRQ(EXTI0_IRQn);
+	I2C1_init(); // initialize I2C peripheral
 
-    /* GPIOD Peripheral clock enable */
-/*     RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOD, ENABLE); */
-    RCC->AHB1ENR |= RCC_AHB1ENR_GPIODEN;
+    CS43L22_init(); // initialize dac periph
 
-    /* I2C1 Peripheral clock enable and I2S3 Peripheral clock enable (SPI3) */
-    RCC->APB1ENR |= RCC_APB1ENR_SPI3EN | RCC_APB1ENR_I2C1EN;
+    led_init(); // init leds
 
-    /* Configure I2SDIV and ODD factor to get desired sampling rate */
-    SPI3->I2SPR = (I2SODD << 8) | I2SDIV;
-    
-    /* Configure I2S instead of SPI, to master-transmit, to use Philips Standard, to
-     * transmit data of 16-bit length, to expect 16-bit data (some are default
-     * and therefore not set)*/
-    SPI3->I2SCFGR = SPI_I2SCFGR_I2SMOD | SPI_I2SCFGR_I2SCFG_1;
+	uint8_t received_data;
+	
+	I2C_start(I2C1, SLAVE_ADDRESS<<1, I2C_Direction_Transmitter); // start a transmission in Master transmitter mode
+	I2C_write(I2C1, 0x01); // write one byte to the slave
+	I2C_stop(I2C1); // stop the transmission
+		
+	I2C_start(I2C1, SLAVE_ADDRESS<<1, I2C_Direction_Receiver); // start a transmission in Master receiver mode
+	received_data = I2C_read_nack(I2C1); // read one byte and don't request another byte, stop transmission
+	if(((received_data & (0x1f << 3)) >> 3) == (0x7 << 2)) {
+        GPIO_SetBits(GPIOD, GPIO_Pin_12);
+    } else {
+        GPIO_SetBits(GPIOD, GPIO_Pin_13);
+    }
+	while(1);
+	return 0;
 
-    /* Enable SPI Transmit interrupt */
-    SPI3->CR2 |= SPI_CR2_TXEIE;
+//
+//    /* Send some control data to make it beep (see Cirrus datasheet) */
+//    
+//    /* Generate start */
+//    I2C_GenerateSTART(I2C1, ENABLE);
+//
+//    /* Write Chip Address, AD0 is low because it's connected to ground */
+//    I2C_Send7bitAddress(I2C1, 0x94, I2C_Direction_Transmitter);
+//
+//    /* write address that we're starting to write at (beep freq/on-time), and
+//     * that we're incrementing addresses */
+//    I2C_SendData(I2C1, 0x1c | 0x80);
+//
+//    /* write beep freq 1000hz, on-time 5.2 sec */
+//    I2C_SendData(I2C1, 0x7f);
+//
+//    /* keep beep volume and time the same */
+//    I2C_SendData(I2C1, 0x00);
+//
+//    /* set beep occurence to continuous, disable mixing, leave eq same */
+//    I2C_SendData(I2C1, 0xe0);
+//
+//    /* close communication */
+//    I2C_GenerateSTOP(I2C1, ENABLE);
+//
+//    /* configure for I2S */
+//    I2C_GenerateSTART(I2C1, ENABLE);
+//    /* Write Chip Address, AD0 is low because it's connected to ground */
+//    I2C_Send7bitAddress(I2C1, 0x94, I2C_Direction_Transmitter);
+//    I2C_SendData(I2C1, 0x06);
+//    I2C_SendData(I2C1, 0x07);
+//    I2C_GenerateSTOP(I2C1, ENABLE);
+//
+//    /* configure headphones and speaker */
+//    I2C_GenerateSTART(I2C1, ENABLE);
+//    /* Write Chip Address, AD0 is low because it's connected to ground */
+//    I2C_Send7bitAddress(I2C1, 0x94, I2C_Direction_Transmitter);
+//    I2C_SendData(I2C1, 0x04);
+//    I2C_SendData(I2C1, 0xA5);
+//    I2C_GenerateSTOP(I2C1, ENABLE);
+//
+//
+//    /* Enable I2S! */
+//    SPI3->I2SCFGR |= SPI_I2SCFGR_I2SE;
+//
+//    /* start another communication */
+//    I2C_GenerateSTART(I2C1, ENABLE);
+//
+//    /* Write Chip Address, AD0 is low because it's connected to ground */
+//    I2C_Send7bitAddress(I2C1, 0x94, I2C_Direction_Transmitter);
+//
+//    /* We're just writing to one address */
+//    I2C_SendData(I2C1, 0x02);
+//    I2C_SendData(I2C1, 0x9e);
+//    I2C_GenerateSTOP(I2C1, ENABLE);
 
-    double somenumber = 0;
-    somenumber = sin(M_PI / 2);
-
-
-    /* Configure PD4 in output pushpull mode (reset pin of cirrus) */
-    GPIO_InitStructure.GPIO_Pin = GPIO_Pin_4|GPIO_Pin_12|GPIO_Pin_13|GPIO_Pin_14|GPIO_Pin_15;
-    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_OUT;
-    GPIO_InitStructure.GPIO_OType = GPIO_OType_PP; /* What happens with open/drain? */
-    GPIO_InitStructure.GPIO_Speed = GPIO_Speed_100MHz;
-    GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_NOPULL;
-    GPIO_Init(GPIOD, &GPIO_InitStructure);
-    
-    /* bring RESET high to enable chip */
-    GPIO_SetBits(GPIOD, GPIO_Pin_4);
-
-    /* Configure I2C1 */
-
-    /* Initialize with defaults */    
-    I2C_StructInit(&I2C_InitStruct);
-    /* 50kHz */
-    I2C_InitStruct.I2C_ClockSpeed     = 100000;
-    /* I2C Mode */
-    I2C_InitStruct.I2C_Mode           = I2C_Mode_I2C;
-
-    /* Initialize I2C */
-    I2C_Init(I2C1, &I2C_InitStruct);
-
-    /* Enable I2C */
-    I2C_Cmd(I2C1, ENABLE);
-
-    /* Send some control data to make it beep (see Cirrus datasheet) */
-    
-    /* Generate start */
-    I2C_GenerateSTART(I2C1, ENABLE);
-
-    /* Write Chip Address, AD0 is low because it's connected to ground */
-    I2C_Send7bitAddress(I2C1, 0x94, I2C_Direction_Transmitter);
-
-    /* write address that we're starting to write at (beep freq/on-time), and
-     * that we're incrementing addresses */
-    I2C_SendData(I2C1, 0x1c | 0x80);
-
-    /* write beep freq 1000hz, on-time 5.2 sec */
-    I2C_SendData(I2C1, 0x7f);
-
-    /* keep beep volume and time the same */
-    I2C_SendData(I2C1, 0x00);
-
-    /* set beep occurence to continuous, disable mixing, leave eq same */
-    I2C_SendData(I2C1, 0xe0);
-
-    /* close communication */
-    I2C_GenerateSTOP(I2C1, ENABLE);
-
-    /* configure for I2S */
-    I2C_GenerateSTART(I2C1, ENABLE);
-    /* Write Chip Address, AD0 is low because it's connected to ground */
-    I2C_Send7bitAddress(I2C1, 0x94, I2C_Direction_Transmitter);
-    I2C_SendData(I2C1, 0x06);
-    I2C_SendData(I2C1, 0x07);
-    I2C_GenerateSTOP(I2C1, ENABLE);
-
-    /* configure headphones and speaker */
-    I2C_GenerateSTART(I2C1, ENABLE);
-    /* Write Chip Address, AD0 is low because it's connected to ground */
-    I2C_Send7bitAddress(I2C1, 0x94, I2C_Direction_Transmitter);
-    I2C_SendData(I2C1, 0x04);
-    I2C_SendData(I2C1, 0xA5);
-    I2C_GenerateSTOP(I2C1, ENABLE);
-
-    /* Enable transmitter interrupt */
-    NVIC_EnableIRQ(SPI3_IRQn);
-
-    /* Enable I2S! */
-    SPI3->I2SCFGR |= SPI_I2SCFGR_I2SE;
-
-    /* start another communication */
-    I2C_GenerateSTART(I2C1, ENABLE);
-
-    /* Write Chip Address, AD0 is low because it's connected to ground */
-    I2C_Send7bitAddress(I2C1, 0x94, I2C_Direction_Transmitter);
-
-    /* We're just writing to one address */
-    I2C_SendData(I2C1, 0x02);
-    I2C_SendData(I2C1, 0x9e);
-    I2C_GenerateSTOP(I2C1, ENABLE);
-
-  while (1)
-  {
-    /* PD12 to be toggled */
-    GPIO_SetBits(GPIOD, GPIO_Pin_13);
-    
-    /* Insert delay */
-    Delay(0x3FFFFF);
-    
-    /* PD13 to be toggled */
-    GPIO_SetBits(GPIOD, GPIO_Pin_12);
-    
-    /* Insert delay */
-    Delay(0x7FFFFF);
-  
-    /* PD14 to be toggled */
-    GPIO_SetBits(GPIOD, GPIO_Pin_14);
-    
-    /* Insert delay */
-    Delay(0x3FFFFF);
-    
-    /* PD15 to be toggled */
-    GPIO_SetBits(GPIOD, GPIO_Pin_15);
-    
-    /* Insert delay */
-    Delay(0x7FFFFF);
-    
-    GPIO_ResetBits(GPIOD, GPIO_Pin_12|GPIO_Pin_13|GPIO_Pin_14|GPIO_Pin_15);
-    
-    /* Insert delay */
-    Delay(0xFFFFFF);
-  }
 }
 
 /**
