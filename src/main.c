@@ -47,7 +47,7 @@ extern void EXTI0_IRQHandler(void);
 // CS43L22 Audio DAC
 // connect PD4 to VDD in order to get the DAC out of reset and test the I2C
 // interface
-#define SLAVE_ADDRESS 0x4A // the slave address (example)
+#define CS43L22_ADDRESS 0x4A // the slave address (example)
 
 void I2C1_init(void){
 	
@@ -81,12 +81,13 @@ void I2C1_init(void){
 	I2C_InitStruct.I2C_Mode = I2C_Mode_I2C;			// I2C mode
 	I2C_InitStruct.I2C_DutyCycle = I2C_DutyCycle_2;	// 50% duty cycle --> standard
 	I2C_InitStruct.I2C_OwnAddress1 = 0x00;			// own address, not relevant in master mode
-	I2C_InitStruct.I2C_Ack = I2C_Ack_Disable;		// disable acknowledge when reading (can be changed later on)
+	I2C_InitStruct.I2C_Ack = I2C_Ack_Enable;		// disable acknowledge when reading (can be changed later on)
 	I2C_InitStruct.I2C_AcknowledgedAddress = I2C_AcknowledgedAddress_7bit; // set address length to 7 bit addresses
-	I2C_Init(I2C1, &I2C_InitStruct);				// init I2C1
-	
 	// enable I2C1
 	I2C_Cmd(I2C1, ENABLE);
+
+	I2C_Init(I2C1, &I2C_InitStruct);				// init I2C1
+	
 }
 
 void I2S_init(void)
@@ -95,22 +96,25 @@ void I2S_init(void)
     I2S_InitTypeDef I2S3_InitStruct;
 
     /* Enable APB1 peripheral clock for I2S3 (SPI3) */
-    RCC_APB1PeriphClockCmd(RCC_APB1Periph_SPI3, ENABLE);
+    RCC_APB1PeriphClockCmd(RCC_APB1Periph_SPI3 | RCC_APB1Periph_I2C1, ENABLE);
     /* Enable AHB1 peripheral clock for GPIOC */
     RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOC, ENABLE);
     /* Enable AHB1 peripheral clock for GPIOA */
     RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOA, ENABLE);
+
+    /* Init I2S PLL */
+    RCC_PLLI2SCmd(ENABLE);
 
     /* Setup MCLK, SCLK and SDIN pins */
     GPIO_InitStruct.GPIO_Pin = GPIO_Pin_7 | GPIO_Pin_10 | GPIO_Pin_12;
     /* set to use alternate function */
     GPIO_InitStruct.GPIO_Mode = GPIO_Mode_AF; 
     /* Just chose the fastest speed */
-    GPIO_InitStruct.GPIO_Speed = GPIO_Speed_100MHz; 
+    GPIO_InitStruct.GPIO_Speed = GPIO_Speed_50MHz; 
     /* open/drain, line only has to be pulled low? using the same as for I2C*/
-    GPIO_InitStruct.GPIO_OType = GPIO_OType_OD;
+    GPIO_InitStruct.GPIO_OType = GPIO_OType_PP;
     /* Enable pull up resistors, also don't know why, using the same as I2C */
-    GPIO_InitStruct.GPIO_PuPd = GPIO_PuPd_UP;
+    GPIO_InitStruct.GPIO_PuPd = GPIO_PuPd_NOPULL;
     /* initialize GPIOC */
     GPIO_Init(GPIOC, &GPIO_InitStruct);
 
@@ -119,11 +123,11 @@ void I2S_init(void)
     /* set to use alternate function */
     GPIOA_InitStruct.GPIO_Mode = GPIO_Mode_AF; 
     /* Just chose the fastest speed */
-    GPIOA_InitStruct.GPIO_Speed = GPIO_Speed_100MHz; 
+    GPIOA_InitStruct.GPIO_Speed = GPIO_Speed_50MHz; 
     /* open/drain, line only has to be pulled low? using the same as for I2C*/
     GPIOA_InitStruct.GPIO_OType = GPIO_OType_OD;
     /* Enable pull up resistors, also don't know why, using the same as I2C */
-    GPIOA_InitStruct.GPIO_PuPd = GPIO_PuPd_UP;
+    GPIOA_InitStruct.GPIO_PuPd = GPIO_PuPd_NOPULL;
     /* initialize GPIOC */
     GPIO_Init(GPIOA, &GPIOA_InitStruct);
     
@@ -134,6 +138,7 @@ void I2S_init(void)
     GPIO_PinAFConfig(GPIOA, GPIO_PinSource4, GPIO_AF_SPI3); /* LRCK/AINx */
 
     /* Configure I2S3 (SPI3) */
+    SPI_I2S_DeInit(SPI3);
     I2S3_InitStruct.I2S_Mode = I2S_Mode_MasterTx;
     I2S3_InitStruct.I2S_Standard = I2S_Standard_Phillips;
     I2S3_InitStruct.I2S_DataFormat = I2S_DataFormat_16b;
@@ -243,23 +248,6 @@ void I2C_stop(I2C_TypeDef* I2Cx){
 	I2C_GenerateSTOP(I2Cx, ENABLE);
 }
 
-/* CS43L22 needs reset pin high to work */
-void CS43L22_init()
-{
-	RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOD, ENABLE);
-    GPIO_InitTypeDef GPIOD_InitStructure;
-    GPIOD_InitStructure.GPIO_Pin = GPIO_Pin_4;
-    GPIOD_InitStructure.GPIO_Mode = GPIO_Mode_OUT;
-    GPIOD_InitStructure.GPIO_OType = GPIO_OType_PP; /* What happens with open/drain? */
-    GPIOD_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
-    GPIOD_InitStructure.GPIO_PuPd = GPIO_PuPd_UP;
-    GPIO_Init(GPIOD, &GPIOD_InitStructure);
-
-    /* bring RESET low then high */
-    GPIO_ResetBits(GPIOD, GPIO_Pin_4);
-    GPIO_SetBits(GPIOD, GPIO_Pin_4);
-}
-
 /* configure LEDs to show some information */
 void led_init()
 {
@@ -272,7 +260,84 @@ void led_init()
     GPIOD_InitStructure.GPIO_PuPd = GPIO_PuPd_NOPULL;
     GPIO_Init(GPIOD, &GPIOD_InitStructure);
 }
-    
+
+void I2C_send_bytes(I2C_TypeDef* I2Cx, uint8_t address, uint8_t *bytes, size_t numBytes)
+{
+    I2C_start(I2Cx, address, I2C_Direction_Transmitter);
+    while (numBytes-- > 0) {
+        I2C_write(I2Cx, *bytes++);
+    }
+    I2C_stop(I2Cx);
+}
+
+/* just gets the bytes, this has to be initializes with the CS43L22 by writing
+ * the address of the register you want to read from, stopping and then by
+ * calling this command and reading */
+void I2C_read_bytes(I2C_TypeDef* I2Cx, uint8_t address, uint8_t *bytes, size_t numBytes)
+{
+    I2C_start(I2Cx, address, I2C_Direction_Receiver);
+    while (numBytes-- > 1) {
+        *bytes++ = I2C_read_ack(I2Cx); /* read but don't signal last byte */
+    }
+    *bytes++ = I2C_read_nack(I2Cx);    /* signal last byte */
+    I2C_stop(I2Cx)
+}
+
+/* read register from address map. If numBytes > 1, sets 7th bit of map high to read
+ * contiguous registers */
+void CS43L22_read_bytes(I2C,TypeDef* I2Cx, uint8_t map, uint8_t *bytes, size_t numBytes)
+{
+    if (numBytes > 1) {
+        map |= 0x80;
+    }
+    I2C_write_bytes(I2Cx, CS43L22_ADDRESS<<1, &map, 1);
+    I2C_read_bytes(I2Cx, CS43L22_ADDRESS<<1, bytes, numBytes);
+}
+
+
+/* CS43L22 needs reset pin high to work */
+void CS43L22_init(I2C_TypeDef* I2Cx)
+{
+    uint8_t buffer[2]; /* holds the commands */
+
+	RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOD, ENABLE);
+    GPIO_InitTypeDef GPIOD_InitStructure;
+    GPIOD_InitStructure.GPIO_Pin = GPIO_Pin_4;
+    GPIOD_InitStructure.GPIO_Mode = GPIO_Mode_OUT;
+    GPIOD_InitStructure.GPIO_OType = GPIO_OType_PP; /* What happens with open/drain? */
+    GPIOD_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
+    GPIOD_InitStructure.GPIO_PuPd = GPIO_PuPd_DOWN;
+    GPIO_Init(GPIOD, &GPIOD_InitStructure);
+
+    /* bring RESET low then high */
+    GPIO_ResetBits(GPIOD, GPIO_Pin_4);
+    GPIO_SetBits(GPIOD, GPIO_Pin_4);
+
+    /* see CS4L22 data sheet for register descriptions. First byte sent is
+     * address, second is value to be written into register */
+
+    /* turn off (Power Ctl 1) */
+    buffer[0] = 0x02; buffer[1] = 0x01;
+    I2C_send_bytes(I2Cx, CS43L22_ADDRESS << 1, buffer, 2);
+
+    /* initialization sequence from CS43L22 datasheet p. 32 */
+    buffer[0] = 0x00; buffer[1] = 0x99;
+    I2C_send_bytes(I2Cx, CS43L22_ADDRESS << 1, buffer, 2);
+    buffer[0] = 0x47; buffer[1] = 0x80;
+    I2C_send_bytes(I2Cx, CS43L22_ADDRESS << 1, buffer, 2);
+    /* read into index 1, so we can then prepend with address, hehe */
+    CS43L22_read_bytes(I2Cx, 0x32, buffer + 1, 1); 
+    buffer[0] = 0x32; buffer[1] |= 0x80;
+    I2C_send_bytes(I2Cx, CS43L22_ADDRESS << 1, buffer, 2);
+    /* read into index 1, so we can then prepend with address, hehe */
+    CS43L22_read_bytes(I2Cx, 0x32, buffer + 1, 1); 
+    buffer[0] = 0x32; buffer[1] &= ~(0x80);
+    I2C_send_bytes(I2Cx, CS43L22_ADDRESS << 1, buffer, 2);
+    buffer[0] = 0x00; buffer[1] = 0x00;
+    I2C_send_bytes(I2Cx, CS43L22_ADDRESS << 1, buffer, 2);
+    /* should be set up now, power ctl 1 is still 'off' though*/
+}
+ 
 /**
   * @brief  Main program
   * @param  None
@@ -290,12 +355,21 @@ int main(void)
 	I2C1_init(); // initialize I2C peripheral
 
     CS43L22_init(); // initialize dac periph
+    /* wait to start-up */
+    uint32_t delaycount = 1000000;
+    while (delaycount-- > 0);
 
     led_init(); // init leds
 
 	uint8_t received_data;
 	
-	I2C_start(I2C1, SLAVE_ADDRESS<<1, I2C_Direction_Transmitter); // start a transmission in Master transmitter mode
+
+	I2C_start(I2C1, CS43L22_ADDRESS<<1, I2C_Direction_Transmitter); // start a transmission in Master transmitter mode
+    I2C_write(I2C1, 0x00);
+    I2C_write(I2C1, 0x99);
+	I2C_stop(I2C1); // stop the transmission
+
+	I2C_start(I2C1, CS43L22_ADDRESS<<1, I2C_Direction_Transmitter); // start a transmission in Master transmitter mode
     /* write address that we're starting to write at (beep freq/on-time), and
      * that we're incrementing addresses */
     I2C_write(I2C1, 0x1c | 0x80);
@@ -308,19 +382,19 @@ int main(void)
 	I2C_stop(I2C1); // stop the transmission
 
     /* configure for I2S */
-	I2C_start(I2C1, SLAVE_ADDRESS<<1, I2C_Direction_Transmitter); // start a transmission in Master transmitter mode
+	I2C_start(I2C1, CS43L22_ADDRESS<<1, I2C_Direction_Transmitter); // start a transmission in Master transmitter mode
     I2C_write(I2C1, 0x06);
     I2C_write(I2C1, 0x07);
 	I2C_stop(I2C1); // stop the transmission
 
     /* configure MCLK */
-	I2C_start(I2C1, SLAVE_ADDRESS<<1, I2C_Direction_Transmitter); // start a transmission in Master transmitter mode
+	I2C_start(I2C1, CS43L22_ADDRESS<<1, I2C_Direction_Transmitter); // start a transmission in Master transmitter mode
     I2C_write(I2C1, 0x07);
     I2C_write(I2C1, 0x00); /* synchronously retimed... */
 	I2C_stop(I2C1); // stop the transmission
 
     /* configure headphones and speaker */
-	I2C_start(I2C1, SLAVE_ADDRESS<<1, I2C_Direction_Transmitter); // start a transmission in Master transmitter mode
+	I2C_start(I2C1, CS43L22_ADDRESS<<1, I2C_Direction_Transmitter); // start a transmission in Master transmitter mode
     I2C_write(I2C1, 0x04);
     I2C_write(I2C1, 0xA5);
     I2C_stop(I2C1);
@@ -332,18 +406,18 @@ int main(void)
     I2S_Cmd(SPI3, ENABLE);
 
     /* set CIRRUS to power on state */
-	I2C_start(I2C1, SLAVE_ADDRESS<<1, I2C_Direction_Transmitter); // start a transmission in Master transmitter mode
+	I2C_start(I2C1, CS43L22_ADDRESS<<1, I2C_Direction_Transmitter); // start a transmission in Master transmitter mode
     I2C_write(I2C1, 0x02);
     I2C_write(I2C1, 0x9e);
     I2C_stop(I2C1);
 
 	/* make sure it still works the old way (red led will come on)*/
 
-	I2C_start(I2C1, SLAVE_ADDRESS<<1, I2C_Direction_Transmitter); // start a transmission in Master transmitter mode
+	I2C_start(I2C1, CS43L22_ADDRESS<<1, I2C_Direction_Transmitter); // start a transmission in Master transmitter mode
 	I2C_write(I2C1, 0x01); // write one byte to the slave
 	I2C_stop(I2C1); // stop the transmission
 		
-	I2C_start(I2C1, SLAVE_ADDRESS<<1, I2C_Direction_Receiver); // start a transmission in Master receiver mode
+	I2C_start(I2C1, CS43L22_ADDRESS<<1, I2C_Direction_Receiver); // start a transmission in Master receiver mode
 	received_data = I2C_read_nack(I2C1); // read one byte and don't request another byte, stop transmission
 	if(((received_data & (0x1f << 3)) >> 3) == (0x7 << 2)) {
         GPIO_SetBits(GPIOD, GPIO_Pin_14);
@@ -352,10 +426,10 @@ int main(void)
     }
 
     /* read CIRRUS status register */
-	I2C_start(I2C1, SLAVE_ADDRESS<<1, I2C_Direction_Transmitter); // start a transmission in Master transmitter mode
+	I2C_start(I2C1, CS43L22_ADDRESS<<1, I2C_Direction_Transmitter); // start a transmission in Master transmitter mode
 	I2C_write(I2C1, 0x2e); // write one byte to the slave
 	I2C_stop(I2C1); // stop the transmission
-	I2C_start(I2C1, SLAVE_ADDRESS<<1, I2C_Direction_Receiver); // start a transmission in Master receiver mode
+	I2C_start(I2C1, CS43L22_ADDRESS<<1, I2C_Direction_Receiver); // start a transmission in Master receiver mode
 	received_data = I2C_read_nack(I2C1); // read one byte and don't request another byte, stop transmission
     if((received_data & 0x7c) != 0){
         /* no good, orange*/
