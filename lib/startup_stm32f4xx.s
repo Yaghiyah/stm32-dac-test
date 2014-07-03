@@ -31,8 +31,9 @@
   */
     
   .syntax unified
-  .cpu cortex-m3
-  .fpu softvfp
+  .cpu cortex-m4
+  .fpu fpv4-sp-d16
+  .arch armv7e-m
   .thumb
 
 .global  g_pfnVectors
@@ -97,6 +98,11 @@ LoopFillZerobss:
   bl  SystemInit   
 /* Call static constructors, we shouldn't need this unless we use c++*/
     bl __libc_init_array
+/* Enable FPU */
+   ldr.w r0, =0xe000ed88
+   ldr r1, [r0]
+   orr r1, r1, #(0xf << 20)
+   str r1, [r0]
 /* Call the application's entry point.*/
   bl  main
   bx  lr    

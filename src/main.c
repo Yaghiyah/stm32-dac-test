@@ -17,10 +17,16 @@
  */
 #define I2SDIV      12
 #define I2SODD      1 
-#define SAMPLING_RATE 48000 
+#define SAMPLING_RATE 48000
+
+#define WAVETABLE_SIZE 512 
 
 /* Play sine tone at 440 Hz */
-#define SINE_TONE_FREQ 440 
+#define SINE_TONE_FREQ 220 
+
+/* generates a sine tone at a specific frequency and sample rate */
+#define sineTone_MACRO(phase, freq, sr) \
+    sin(2 * M_PI * (phase)); phase += freq / sr; while (phase > 1.) { phase -= 1.; };
 
 
 /** @addtogroup STM32F4_Discovery_Peripheral_Examples
@@ -34,6 +40,7 @@
 /* Private typedef -----------------------------------------------------------*/
 GPIO_InitTypeDef    GPIO_InitStructure;
 I2C_InitTypeDef     I2C_InitStruct;
+float   waveTable[WAVETABLE_SIZE]; /* holds sine tone */
 
 void Delay(__IO uint32_t nCount);
 double sineTone(double *phase, double freq, double sr);
@@ -359,6 +366,15 @@ int main(void)
      */
 
     uint8_t buffer[8];
+    size_t i;
+
+    /* enable FPU IRQ? */
+//    NVIC_EnableIRQ(FPU_IRQn);
+
+    /* first, fill wavetable */
+    for (i = 0; i < WAVETABLE_SIZE; ++i) {
+        waveTable[i] = (float)sinf((float)2 * M_PI * ((float)i)/((float)WAVETABLE_SIZE));
+    }
 
 	I2C1_init(); // initialize I2C peripheral
 
@@ -430,7 +446,7 @@ void EXTI0_IRQHandler(void)
 }
 
 /* generates a sine tone at a specific frequency and sample rate */
-double sineTone(double *phase, double freq, double sr)
+inline double sineTone(double *phase, double freq, double sr)
 {
     *phase += freq / sr;
     while (*phase > 1.) { *phase -= 1.; }
@@ -450,42 +466,36 @@ int16_t simpleTone()
 void SPI3_IRQHandler(void)
 {
 //    static double phaseL = 0, phaseR = 0;
+    static size_t idxL = 0, idxR = 0;
     uint16_t data;
-    NVIC_DisableIRQ(SPI3_IRQn);
+//    NVIC_DisableIRQ(SPI3_IRQn);
 
     /* Check that transmit buffer empty */
     if (SPI3->SR & (uint32_t)SPI_SR_TXE) {
         /* If so, fill with data */
         if (SPI3->SR & (uint32_t)SPI_SR_CHSIDE) {
-            data = rand();
-            SPI_I2S_SendData(SPI3,data >> 8);
-            /*
-            SPI3->DR = (uint16_t)(0xffff * sineTone(&phaseR,
-                SINE_TONE_FREQ,
-                SAMPLING_RATE));*/
+            data = (int16_t)waveTable[idxR];
+            idxR += 2;
+            SPI_I2S_SendData(SPI3,data >> 12);
         } else {
-            data = rand();
-            SPI_I2S_SendData(SPI3,data >> 8);
-            /*
-            SPI3->DR = (uint16_t)(0xffff * sineTone(&phaseL,
-                SINE_TONE_FREQ,
-                SAMPLING_RATE));
-                */
+            data = (int16_t)waveTable[idxL];
+            idxL += 2;
+            SPI_I2S_SendData(SPI3,data >> 12);
         }
-        /*
-        SPI3->DR = (SPI3->SR & (uint32_t)SPI_SR_CHSIDE) ? 
-            (uint16_t)(0xffff * sineTone(&phaseR,
-                SINE_TONE_FREQ,
-                SAMPLING_RATE)) :
-            (uint16_t)(0xffff * sineTone(&phaseL,
-                SINE_TONE_FREQ,
-                SAMPLING_RATE));
-        */
-        /* set transmit buffer to not empty */
-//        SPI3->SR &= ~SPI_SR_TXE;
-    } /* Otherwise do nothing for now */
+//        if (SPI3->SR & (uint32_t)SPI_SR_CHSIDE) {
+//            data = (int16_t)sineTone_MACRO(phaseR,
+//                SINE_TONE_FREQ,
+//                SAMPLING_RATE);
+//            SPI_I2S_SendData(SPI3,data >> 12);
+//        } else {
+//            data = (int16_t)sineTone_MACRO(phaseL,
+//                SINE_TONE_FREQ - 1,
+//                SAMPLING_RATE);
+//            SPI_I2S_SendData(SPI3,data >> 12);
+//        }
+    }
 
-    NVIC_EnableIRQ(SPI3_IRQn);
+//    NVIC_EnableIRQ(SPI3_IRQn);
 }
 
 
