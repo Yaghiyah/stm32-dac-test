@@ -370,11 +370,6 @@ int main(void)
 
     uint8_t buffer[8];
     size_t i;
-    double v1, op1 = 2659414;
-
-//    NVIC_EnableIRQ(FPU_IRQn);
-
-    v1 = sin((double)op1);
 
     /* first, fill wavetable */
     for (i = 0; i < WAVETABLE_SIZE; ++i) {
@@ -451,7 +446,7 @@ void EXTI0_IRQHandler(void)
 }
 
 /* generates a sine tone at a specific frequency and sample rate */
-inline double sineTone(double *phase, double freq, double sr)
+double sineTone(double *phase, double freq, double sr)
 {
     *phase += freq / sr;
     while (*phase > 1.) { *phase -= 1.; }
@@ -470,39 +465,25 @@ int16_t simpleTone()
  * buffer with values to transmit */
 void SPI3_IRQHandler(void)
 {
-//    static double phaseL = 0, phaseR = 0;
-    static size_t idxL = 0, idxR = 0;
+    static double phaseL = 0, phaseR = 0;
     uint16_t data;
-//    NVIC_DisableIRQ(SPI3_IRQn);
-
     /* Check that transmit buffer empty */
     if (SPI3->SR & (uint32_t)SPI_SR_TXE) {
         /* If so, fill with data */
         if (SPI3->SR & (uint32_t)SPI_SR_CHSIDE) {
-            data = FLT_TO_UINT16(waveTable[idxR]);
-            idxR += 2;
-            if (idxR >= WAVETABLE_SIZE) { idxR = 0; }
-            SPI_I2S_SendData(SPI3,data >> 4);
+            data = FLT_TO_UINT16(sineTone(&phaseR,
+                SINE_TONE_FREQ,
+                SAMPLING_RATE));
+            SPI_I2S_SendData(SPI3,data >> 8);
+
         } else {
-            data = FLT_TO_UINT16(waveTable[idxL]);
-            idxL += 2;
-            if (idxL >= WAVETABLE_SIZE) { idxL = 0; }
-            SPI_I2S_SendData(SPI3,data >> 4);
+            data = FLT_TO_UINT16(sineTone(&phaseL,
+                SINE_TONE_FREQ + 37,
+                SAMPLING_RATE));
+            SPI_I2S_SendData(SPI3,data >> 8);
         }
-//        if (SPI3->SR & (uint32_t)SPI_SR_CHSIDE) {
-//            data = (int16_t)sineTone_MACRO(phaseR,
-//                SINE_TONE_FREQ,
-//                SAMPLING_RATE);
-//            SPI_I2S_SendData(SPI3,data >> 12);
-//        } else {
-//            data = (int16_t)sineTone_MACRO(phaseL,
-//                SINE_TONE_FREQ - 1,
-//                SAMPLING_RATE);
-//            SPI_I2S_SendData(SPI3,data >> 12);
-//        }
     }
 
-//    NVIC_EnableIRQ(SPI3_IRQn);
 }
 
 
