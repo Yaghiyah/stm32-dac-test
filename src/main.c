@@ -43,10 +43,10 @@
 /* Private typedef -----------------------------------------------------------*/
 GPIO_InitTypeDef    GPIO_InitStructure;
 I2C_InitTypeDef     I2C_InitStruct;
-float   waveTable[WAVETABLE_SIZE]; /* holds sine tone */
 
 void Delay(__IO uint32_t nCount);
 double sineTone(double *phase, double freq, double sr);
+
 
 /* Interrupt definition */
 extern void SPI3_IRQHandler(void);
@@ -58,6 +58,10 @@ extern void EXTI0_IRQHandler(void);
 // connect PD4 to VDD in order to get the DAC out of reset and test the I2C
 // interface
 #define CS43L22_ADDRESS 0x4A // the slave address (example)
+
+/* Pointers to functions that generate sound, for each channel */
+double (*pfdv_soundL)(void);
+double (*pfdv_soundR)(void);
 
 void I2C1_init(void){
 	
@@ -369,12 +373,13 @@ int main(void)
      */
 
     uint8_t buffer[8];
+    uint8_t *ary;
     size_t i;
 
-    /* first, fill wavetable */
-    for (i = 0; i < WAVETABLE_SIZE; ++i) {
-        waveTable[i] = (float)sinf((float)2 * M_PI * ((float)i)/((float)WAVETABLE_SIZE));
-    }
+    /* Try allocing */
+    ary = (uint8_t*)malloc(0x2000);
+    for (i = 0; i < 0x2000; ++i) { ary[i] = i; }
+    free(ary);
 
 	I2C1_init(); // initialize I2C peripheral
 
