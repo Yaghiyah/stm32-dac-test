@@ -1,6 +1,7 @@
 # put your *.o targets here, make should handle the rest!
 
-SRCS = main.c stm32f4xx_it.c system_stm32f4xx.c syscalls.c
+SRCS = main.c stm32f4xx_it.c system_stm32f4xx.c syscalls.c synths.c interpolation.c
+INCS = inc/synths.h inc/interpolation.h
 
 # all the files will be generated with this name (main.elf, main.bin, main.hex, etc)
 
@@ -13,7 +14,7 @@ PROJ_NAME=main
 CC=arm-none-eabi-gcc
 OBJCOPY=arm-none-eabi-objcopy
 
-CFLAGS  = -g -Wall -Tstm32_flash.ld 
+CFLAGS  = -g -Wall -Tstm32_flash.ld -O3 
 CFLAGS += -mlittle-endian -mthumb -mcpu=cortex-m4 #-mthumb-interwork
 CFLAGS += -mfloat-abi=hard -mfpu=fpv4-sp-d16 -march=armv7e-m
 
@@ -42,8 +43,8 @@ lib:
 
 proj: 	$(PROJ_NAME).elf
 
-$(PROJ_NAME).elf: $(SRCS)
-	$(CC) $(CFLAGS) $^ -o $@ -Llib -lstm32f4 -lm
+$(PROJ_NAME).elf: $(SRCS) $(INCS)
+	$(CC) $(CFLAGS) $(filter-out %.h,$^) -o $@ -Llib -lstm32f4 -lm
 	$(OBJCOPY) -O ihex $(PROJ_NAME).elf $(PROJ_NAME).hex
 	$(OBJCOPY) -O binary $(PROJ_NAME).elf $(PROJ_NAME).bin
 

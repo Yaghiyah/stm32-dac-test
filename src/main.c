@@ -2,13 +2,14 @@
 
 /* Includes ------------------------------------------------------------------*/
 #include <math.h> 
+#include <stdlib.h> 
 /* This has to be included before core_cm4 because it tells it our interrupt
  * table */
-#include <stdlib.h> 
 #include "stm32f4xx.h"
 #include <core_cm4.h> 
 #include "stm32f4_discovery.h"
-#include "stm32f4xx_conf.h" // again, added because ST didn't put it here ?
+#include "stm32f4xx_conf.h" 
+#include "synths.h" 
 
 /* In combination with
  * PLLI2S_N  =  192
@@ -17,9 +18,10 @@
  */
 #define I2SDIV      12
 #define I2SODD      1 
-#define SAMPLING_RATE 48000
+#define SAMPLING_RATE SYNTHS_SR
+#define RANDOM_SEED 1000 
 
-#define WAVETABLE_SIZE 512 
+#define NUM_SYNTHS 3
 
 /* Play sine tone at 440 Hz */
 #define SINE_TONE_FREQ 220 
@@ -59,9 +61,21 @@ extern void EXTI0_IRQHandler(void);
 // interface
 #define CS43L22_ADDRESS 0x4A // the slave address (example)
 
+/* the synth */
+WaveArraySynth wasL, wasR;
 /* Pointers to functions that generate sound, for each channel */
 double (*pfdv_soundL)(void);
 double (*pfdv_soundR)(void);
+
+static double WaveArraySynth_soundL(void)
+{
+    return wasL.waveArrayTick(&wasL);
+}
+
+static double WaveArraySynth_soundR(void)
+{
+    return wasR.waveArrayTick(&wasR);
+}
 
 void I2C1_init(void){
 	
@@ -157,7 +171,7 @@ void I2S_init(void)
     I2S3_InitStruct.I2S_Standard = I2S_Standard_Phillips;
     I2S3_InitStruct.I2S_DataFormat = I2S_DataFormat_16b;
     I2S3_InitStruct.I2S_MCLKOutput = I2S_MCLKOutput_Enable;
-    I2S3_InitStruct.I2S_AudioFreq = I2S_AudioFreq_48k;
+    I2S3_InitStruct.I2S_AudioFreq = SAMPLING_RATE;
     I2S3_InitStruct.I2S_CPOL = I2S_CPOL_Low; /* I don't know, low I guess. */
     I2S_Init(SPI3, &I2S3_InitStruct);
 
@@ -356,6 +370,13 @@ void CS43L22_init(I2C_TypeDef* I2Cx)
     buffer[0] = 0x00; buffer[1] = 0x00;
     I2C_send_bytes(I2Cx, CS43L22_ADDRESS << 1, buffer, 2);
     /* should be set up now, power ctl 1 is still 'off' though*/
+
+}
+
+void rng_init(void)
+{
+    RCC_AHB2PeriphClockCmd(RCC_AHB2Periph_RNG, ENABLE);
+    RNG_Cmd(ENABLE);
 }
  
 /**
@@ -373,13 +394,34 @@ int main(void)
      */
 
     uint8_t buffer[8];
-    uint8_t *ary;
     size_t i;
+    WaveArray *waL, *waR;
 
-    /* Try allocing */
-    ary = (uint8_t*)malloc(0x2000);
-    for (i = 0; i < 0x2000; ++i) { ary[i] = i; }
-    free(ary);
+    waL = WaveArray_new(NUM_SYNTHS);
+    waR = WaveArray_new(NUM_SYNTHS);
+
+    /* Initialize internal random number generator */
+    rng_init();
+    /* wait for number to be ready */
+    while (!RNG_GetFlagStatus(RNG_FLAG_DRDY));
+
+    srand48(RNG_GetRandomNumber());
+
+    for (i = 0; i < NUM_SYNTHS; i++) {
+        waL->waves[i].freq = drand48() * 2000;
+        waL->waves[i].amp  = 1. / NUM_SYNTHS;
+    }
+
+    for (i = 0; i < NUM_SYNTHS; i++) {
+        waR->waves[i].freq = drand48() * 2000;
+        waR->waves[i].amp  = 1. / NUM_SYNTHS;
+    }
+
+    WaveArraySynth_init_sines(&wasL, waL);
+    WaveArraySynth_init_sines(&wasR, waR);
+
+    pfdv_soundL = &WaveArraySynth_soundL;
+    pfdv_soundR = &WaveArraySynth_soundR;
 
 	I2C1_init(); // initialize I2C peripheral
 
@@ -392,12 +434,6 @@ int main(void)
     CS43L22_init(I2C1); // initialize dac periph
 
     led_init(); // init leds
-
-//    buffer[0] = 0x1c | 0x80; /* beep frequency and on-time */
-//    buffer[1] = 0x7f; /* 1000hz, on-time 5.2 s */
-//    buffer[2] = 0x00; /* 1.23 s off-time, -6 dB volume */
-//    buffer[3] = 0xc0; /* continuous beep, mix with signal from serial data input */
-//    I2C_send_bytes(I2C1, CS43L22_ADDRESS << 1, buffer, 4);
 
     /* configure for I2S */
     buffer[0] = 0x06;
@@ -450,14 +486,6 @@ void EXTI0_IRQHandler(void)
     NVIC_EnableIRQ(EXTI0_IRQn);
 }
 
-/* generates a sine tone at a specific frequency and sample rate */
-double sineTone(double *phase, double freq, double sr)
-{
-    *phase += freq / sr;
-    while (*phase > 1.) { *phase -= 1.; }
-    return sin(2 * M_PI * (*phase));
-}
-
 int16_t simpleTone()
 {
     static int16_t state = 0x7fff;
@@ -470,21 +498,16 @@ int16_t simpleTone()
  * buffer with values to transmit */
 void SPI3_IRQHandler(void)
 {
-    static double phaseL = 0, phaseR = 0;
     uint16_t data;
     /* Check that transmit buffer empty */
     if (SPI3->SR & (uint32_t)SPI_SR_TXE) {
         /* If so, fill with data */
         if (SPI3->SR & (uint32_t)SPI_SR_CHSIDE) {
-            data = FLT_TO_UINT16(sineTone(&phaseR,
-                SINE_TONE_FREQ,
-                SAMPLING_RATE));
+            data = FLT_TO_UINT16(pfdv_soundR());
             SPI_I2S_SendData(SPI3,data >> 8);
 
         } else {
-            data = FLT_TO_UINT16(sineTone(&phaseL,
-                SINE_TONE_FREQ + 37,
-                SAMPLING_RATE));
+            data = FLT_TO_UINT16(pfdv_soundL());
             SPI_I2S_SendData(SPI3,data >> 8);
         }
     }
