@@ -367,9 +367,11 @@ int main(void)
 
     uint8_t buffer[8];
     size_t i;
+    double v1, op1 = 2659414;
 
-    /* enable FPU IRQ? */
 //    NVIC_EnableIRQ(FPU_IRQn);
+
+    v1 = sin((double)op1);
 
     /* first, fill wavetable */
     for (i = 0; i < WAVETABLE_SIZE; ++i) {
@@ -474,12 +476,14 @@ void SPI3_IRQHandler(void)
     if (SPI3->SR & (uint32_t)SPI_SR_TXE) {
         /* If so, fill with data */
         if (SPI3->SR & (uint32_t)SPI_SR_CHSIDE) {
-            data = (int16_t)waveTable[idxR];
+            data = (int16_t)(0x7fff * waveTable[idxR]);
             idxR += 2;
+            if (idxR >= WAVETABLE_SIZE) { idxR = 0; }
             SPI_I2S_SendData(SPI3,data >> 12);
         } else {
-            data = (int16_t)waveTable[idxL];
+            data = (int16_t)(0x7fff * waveTable[idxL]);
             idxL += 2;
+            if (idxL >= WAVETABLE_SIZE) { idxL = 0; }
             SPI_I2S_SendData(SPI3,data >> 12);
         }
 //        if (SPI3->SR & (uint32_t)SPI_SR_CHSIDE) {
