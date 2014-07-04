@@ -28,6 +28,9 @@
 #define sineTone_MACRO(phase, freq, sr) \
     sin(2 * M_PI * (phase)); phase += freq / sr; while (phase > 1.) { phase -= 1.; };
 
+/* map a a floating point value in between -1 and 1 to uint16_t */
+#define FLT_TO_UINT16(x) ((uint16_t)(0xffff*((x + 1.) * 0.5)))
+
 
 /** @addtogroup STM32F4_Discovery_Peripheral_Examples
   * @{
@@ -476,15 +479,15 @@ void SPI3_IRQHandler(void)
     if (SPI3->SR & (uint32_t)SPI_SR_TXE) {
         /* If so, fill with data */
         if (SPI3->SR & (uint32_t)SPI_SR_CHSIDE) {
-            data = (int16_t)(0x7fff * waveTable[idxR]);
+            data = FLT_TO_UINT16(waveTable[idxR]);
             idxR += 2;
             if (idxR >= WAVETABLE_SIZE) { idxR = 0; }
-            SPI_I2S_SendData(SPI3,data >> 12);
+            SPI_I2S_SendData(SPI3,data >> 4);
         } else {
-            data = (int16_t)(0x7fff * waveTable[idxL]);
+            data = FLT_TO_UINT16(waveTable[idxL]);
             idxL += 2;
             if (idxL >= WAVETABLE_SIZE) { idxL = 0; }
-            SPI_I2S_SendData(SPI3,data >> 12);
+            SPI_I2S_SendData(SPI3,data >> 4);
         }
 //        if (SPI3->SR & (uint32_t)SPI_SR_CHSIDE) {
 //            data = (int16_t)sineTone_MACRO(phaseR,
