@@ -27,6 +27,8 @@ typedef struct __WaveArraySynth {
 
 WaveArray *WaveArray_new(size_t size);
 double sineTone(double *phase, double freq, double sr);
+double squareTone(double *phase, double freq, double sr);
+double sawTone(double *phase, double freq, double sr);
 void WaveArraySynth_init_sines(WaveArraySynth *synth, WaveArray *waveArray);
 
 #endif /* SYNTHS_H */

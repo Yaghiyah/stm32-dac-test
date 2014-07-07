@@ -12,6 +12,21 @@ double sineTone(double *phase, double freq, double sr)
     return sin(2 * M_PI * (*phase));
 }
 
+double squareTone(double *phase, double freq, double sr)
+{
+    *phase += freq / sr;
+    while (*phase > 1.) { *phase -= 1.; }
+    if (*phase > 0.5) { return -1; };
+    return 1;
+}
+
+double sawTone(double *phase, double freq, double sr)
+{
+    *phase += freq / sr;
+    while (*phase > 1.) { *phase -= 1.; }
+    return (*phase - 0.5) * 2;
+}
+
 /* generates cosine tone looked up from the wavetable */
 
 static double WaveArray_sine_tick(WaveArraySynth *waveArraySynth)

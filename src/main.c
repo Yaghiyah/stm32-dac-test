@@ -70,6 +70,13 @@ WaveArraySynth wasL, wasR;
 double (*pfdv_soundL)(void);
 double (*pfdv_soundR)(void);
 
+static int16_t stupidSaw(int16_t *phase)
+{
+    *phase = *phase + 1;
+    return *phase;
+}
+
+
 static double WaveArraySynth_soundL(void)
 {
     return wasL.waveArrayTick(&wasL);
@@ -78,6 +85,27 @@ static double WaveArraySynth_soundL(void)
 static double WaveArraySynth_soundR(void)
 {
     return wasR.waveArrayTick(&wasR);
+}
+
+static double simpleSineL(void)
+{
+    static double phase;
+    return sineTone(&phase,220.5,SAMPLING_RATE) * 0.99;
+//    return squareTone(&phase,220.5,SAMPLING_RATE);
+//    return sawTone(&phase,((double)SAMPLING_RATE) / ((double)(1l << 16)),SAMPLING_RATE);
+}
+
+static double simpleSineR(void)
+{
+    static double phase;
+    return sineTone(&phase,220.5,SAMPLING_RATE) * 0.99;
+//    return squareTone(&phase,220.5,SAMPLING_RATE);
+//    return sawTone(&phase,220.5,SAMPLING_RATE);
+}
+
+static double simpleADCRead(void)
+{
+    return ADC_GetConversionValue(ADC1);
 }
 
 void I2C1_init(void){
@@ -125,7 +153,6 @@ void I2S_init(void)
 {
     GPIO_InitTypeDef GPIO_InitStruct, GPIOA_InitStruct;
     I2S_InitTypeDef I2S3_InitStruct;
-
     /* Enable APB1 peripheral clock for I2S3 (SPI3) */
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_SPI3 | RCC_APB1Periph_I2C1, ENABLE);
     /* Enable AHB1 peripheral clock for GPIOC */
@@ -423,8 +450,43 @@ int main(void)
     WaveArraySynth_init_sines(&wasL, waL);
     WaveArraySynth_init_sines(&wasR, waR);
 
+    /*
     pfdv_soundL = &WaveArraySynth_soundL;
     pfdv_soundR = &WaveArraySynth_soundR;
+    */
+    /*
+    pfdv_soundL = &simpleSineL;
+    pfdv_soundR = &simpleSineR;
+    */
+    pfdv_soundL = &simpleADCRead;
+    pfdv_soundR = &simpleADCRead;
+
+    GPIO_InitTypeDef ADC_GPIO_InitStruct;
+    ADC_InitTypeDef ADC_InitStruct;
+
+    /* ADC interface clock enable */
+    RCC_APB2PeriphClockCmd(RCC_APB2Periph_ADC1, ENABLE);
+    /* Enable ADC GPIO clock */
+    RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOA, ENABLE);
+
+    /* Configure GPIO for ADC */
+    ADC_GPIO_InitStruct.GPIO_Pin = GPIO_Pin_1;
+    ADC_GPIO_InitStruct.GPIO_Mode = GPIO_Mode_AN;
+    GPIO_Init(GPIOA, &ADC_GPIO_InitStruct);
+
+    /* Configure ADC */
+    ADC_InitStruct.ADC_Resolution = ADC_Resolution_12b;
+    ADC_InitStruct.ADC_ScanConvMode = DISABLE;
+    ADC_InitStruct.ADC_ContinuousConvMode = ENABLE;
+    ADC_InitStruct.ADC_DataAlign = ADC_DataAlign_Right;
+//    ADC_InitStruct.ADC_ExternalTrigConv = ADC_ExternalTrigConv_T1_CC1;
+//    ADC_InitStruct.ADC_ExternalTrigConvEdge = ADC_ExternalTrigConvEdge_None;
+    ADC_InitStruct.ADC_NbrOfConversion = 1;
+    ADC_Init(ADC1,&ADC_InitStruct);
+
+    /* Enable ADC */
+    ADC_Cmd(ADC1,ENABLE);
+
 
 	I2C1_init(); // initialize I2C peripheral
 
