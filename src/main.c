@@ -33,6 +33,9 @@
 /* map a a floating point value in between -1 and 1 to uint16_t */
 #define FLT_TO_UINT16(x) ((uint16_t)(0xffff*((x + 1.) * 0.5)))
 
+/* map a a floating point value in between -1 and 1 to int16_t */
+#define FLT_TO_INT16(x) ((int16_t)(0x7fff*x))
+
 
 /** @addtogroup STM32F4_Discovery_Peripheral_Examples
   * @{
@@ -503,12 +506,12 @@ void SPI3_IRQHandler(void)
     if (SPI3->SR & (uint32_t)SPI_SR_TXE) {
         /* If so, fill with data */
         if (SPI3->SR & (uint32_t)SPI_SR_CHSIDE) {
-            data = FLT_TO_UINT16(pfdv_soundR());
-            SPI_I2S_SendData(SPI3,data >> 8);
+            data = FLT_TO_INT16(pfdv_soundR());
+            SPI_I2S_SendData(SPI3,data);
 
         } else {
-            data = FLT_TO_UINT16(pfdv_soundL());
-            SPI_I2S_SendData(SPI3,data >> 8);
+            data = FLT_TO_INT16(pfdv_soundL());
+            SPI_I2S_SendData(SPI3,data);
         }
     }
 
